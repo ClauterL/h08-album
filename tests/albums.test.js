@@ -60,6 +60,35 @@ describe('GET /api/albums', () => {
   })
 })
 
+describe('GET /api/health', () => {
+  test('palauttaa ok + aikaleima', async () => {
+    const res = await request(app).get('/api/health')
+    expect(res.statusCode).toBe(200)
+    expect(res.body.ok).toBe(true)
+    expect(res.body.service).toBe('h08-album')
+    expect(typeof res.body.time).toBe('string')
+    expect(res.body.time.length).toBeGreaterThan(10)
+  })
+})
+
+describe('GET /api/db-status', () => {
+  test('palauttaa Mongo-yhteyden tilan', async () => {
+    const res = await request(app).get('/api/db-status')
+    expect(res.statusCode).toBe(200)
+    expect(res.body.ok).toBe(true)
+    expect(res.body.mongo.readyState).toBe(1)
+  })
+})
+
+describe('GET /', () => {
+  test('palauttaa pienen status-UI:n (HTML)', async () => {
+    const res = await request(app).get('/')
+    expect(res.statusCode).toBe(200)
+    expect(String(res.headers['content-type'] || '')).toContain('text/html')
+    expect(res.text).toContain('H08 – Album API')
+  })
+})
+
 describe('POST /api/albums', () => {
   test('lisää uuden albumin ja albumien määrä kasvaa yhdellä', async () => {
     const initial = await Album.countDocuments({})

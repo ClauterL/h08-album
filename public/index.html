@@ -1,0 +1,204 @@
+<!doctype html>
+<html lang="fi">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>H08 – Album API (status)</title>
+    <style>
+      :root { color-scheme: light dark; }
+      body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; margin: 24px; line-height: 1.35; }
+      h1 { font-size: 20px; margin: 0 0 12px; }
+      .grid { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); }
+      .card { border: 1px solid rgba(127,127,127,.35); border-radius: 12px; padding: 12px; }
+      .muted { opacity: .75; font-size: 13px; }
+      pre { white-space: pre-wrap; word-break: break-word; margin: 8px 0 0; font-size: 12px; }
+      .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+      button { padding: 8px 10px; border-radius: 10px; border: 1px solid rgba(127,127,127,.45); background: transparent; cursor: pointer; }
+      input { padding: 8px 10px; border-radius: 10px; border: 1px solid rgba(127,127,127,.45); min-width: 160px; }
+      table { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 13px; }
+      th, td { border-bottom: 1px solid rgba(127,127,127,.25); padding: 8px 6px; text-align: left; vertical-align: top; }
+      .pill { display: inline-block; padding: 2px 8px; border-radius: 999px; border: 1px solid rgba(127,127,127,.35); font-size: 12px; }
+      .ok { border-color: rgba(0, 160, 90, .45); }
+      .bad { border-color: rgba(220, 60, 60, .45); }
+    </style>
+  </head>
+  <body>
+    <h1>H08 – Album API</h1>
+    <div class="muted">
+      Tämä sivu näyttää selvästi, että palvelu vastaa oikein: health, DB-status ja albumit.
+    </div>
+
+    <div class="row" style="margin: 12px 0 16px;">
+      <button type="button" id="btnRefresh">Päivitä kaikki</button>
+      <span class="muted" id="lastUpdated"></span>
+    </div>
+
+    <div class="grid">
+      <section class="card">
+        <div class="row" style="justify-content: space-between;">
+          <strong>/api/health</strong>
+          <span id="healthPill" class="pill">…</span>
+        </div>
+        <pre id="healthOut">Ladataan…</pre>
+      </section>
+
+      <section class="card">
+        <div class="row" style="justify-content: space-between;">
+          <strong>/api/db-status</strong>
+          <span id="dbPill" class="pill">…</span>
+        </div>
+        <pre id="dbOut">Ladataan…</pre>
+      </section>
+
+      <section class="card" style="grid-column: 1 / -1;">
+        <div class="row" style="justify-content: space-between;">
+          <strong>/api/albums</strong>
+          <span id="albumsPill" class="pill">…</span>
+        </div>
+
+        <div class="row" style="margin-top: 10px;">
+          <input id="artist" placeholder="artist" />
+          <input id="title" placeholder="title" />
+          <input id="year" placeholder="year (numero)" inputmode="numeric" />
+          <input id="genre" placeholder="genre" />
+          <input id="tracks" placeholder="tracks (numero)" inputmode="numeric" />
+          <button type="button" id="btnCreate">Lisää albumi (POST)</button>
+        </div>
+
+        <div id="postMsg" class="muted" style="margin-top: 8px;"></div>
+
+        <table>
+          <thead>
+            <tr>
+              <th>artist</th>
+              <th>title</th>
+              <th>year</th>
+              <th>genre</th>
+              <th>tracks</th>
+            </tr>
+          </thead>
+          <tbody id="albumRows"></tbody>
+        </table>
+
+        <details style="margin-top: 10px;">
+          <summary class="muted">Raw JSON</summary>
+          <pre id="albumsRaw">…</pre>
+        </details>
+      </section>
+    </div>
+
+    <script>
+      const $ = (id) => document.getElementById(id)
+
+      function setPill(el, ok, text) {
+        el.textContent = text
+        el.classList.remove('ok', 'bad')
+        el.classList.add(ok ? 'ok' : 'bad')
+      }
+
+      async function safeJson(path) {
+        const res = await fetch(path, { headers: { Accept: 'application/json' } })
+        const text = await res.text()
+        let json = null
+        try { json = JSON.parse(text) } catch { /* ignore */ }
+        return { res, text, json }
+      }
+
+      async function refreshAll() {
+        $('lastUpdated').textContent = 'Päivitetään…'
+
+        // health
+        {
+          const { res, json } = await safeJson('/api/health')
+          const ok = res.ok && json && json.ok === true
+          setPill($('healthPill'), ok, ok ? 'OK' : `HTTP ${res.status}`)
+          $('healthOut').textContent = json ? JSON.stringify(json, null, 2) : '(ei JSONia)'
+        }
+
+        // db
+        {
+          const { res, json } = await safeJson('/api/db-status')
+          const ok = res.ok && json && json.ok === true
+          setPill($('dbPill'), ok, ok ? 'CONNECTED' : `HTTP ${res.status}`)
+          $('dbOut').textContent = json ? JSON.stringify(json, null, 2) : '(ei JSONia)'
+        }
+
+        // albums
+        {
+          const { res, json } = await safeJson('/api/albums')
+          const ok = res.ok && Array.isArray(json)
+          setPill($('albumsPill'), ok, ok ? `OK (${json.length})` : `HTTP ${res.status}`)
+          $('albumsRaw').textContent = json ? JSON.stringify(json, null, 2) : '(ei JSONia)'
+
+          const tbody = $('albumRows')
+          tbody.innerHTML = ''
+          if (Array.isArray(json)) {
+            for (const a of json) {
+              const tr = document.createElement('tr')
+              tr.innerHTML = `
+                <td>${escapeHtml(a.artist ?? '')}</td>
+                <td>${escapeHtml(a.title ?? '')}</td>
+                <td>${escapeHtml(a.year ?? '')}</td>
+                <td>${escapeHtml(a.genre ?? '')}</td>
+                <td>${escapeHtml(a.tracks ?? '')}</td>
+              `
+              tbody.appendChild(tr)
+            }
+          }
+        }
+
+        $('lastUpdated').textContent = `Viimeksi päivitetty: ${new Date().toLocaleString()}`
+      }
+
+      function escapeHtml(s) {
+        return String(s)
+          .replaceAll('&', '&amp;')
+          .replaceAll('<', '&lt;')
+          .replaceAll('>', '&gt;')
+          .replaceAll('"', '&quot;')
+          .replaceAll("'", '&#039;')
+      }
+
+      $('btnRefresh').addEventListener('click', () => refreshAll().catch(err => alert(String(err))))
+
+      $('btnCreate').addEventListener('click', async () => {
+        $('postMsg').textContent = ''
+        const artist = $('artist').value.trim()
+        const title = $('title').value.trim()
+        const year = Number($('year').value.trim())
+        const genre = $('genre').value.trim()
+        const tracks = Number($('tracks').value.trim())
+
+        if (!artist || !title) {
+          $('postMsg').textContent = 'Täytä vähintään artist + title.'
+          return
+        }
+
+        const body = { artist, title }
+        if (Number.isFinite(year)) body.year = year
+        if (genre) body.genre = genre
+        if (Number.isFinite(tracks)) body.tracks = tracks
+
+        const res = await fetch('/api/albums', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+          body: JSON.stringify(body)
+        })
+
+        const text = await res.text()
+        let json = null
+        try { json = JSON.parse(text) } catch { /* ignore */ }
+
+        if (!res.ok) {
+          $('postMsg').textContent = `POST epäonnistui (${res.status}): ${text}`
+          return
+        }
+
+        $('postMsg').textContent = `OK: luotiin albumi (${json?._id ?? 'id?'})`
+        await refreshAll()
+      })
+
+      refreshAll().catch(err => alert(String(err)))
+    </script>
+  </body>
+</html>
