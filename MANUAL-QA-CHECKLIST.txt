@@ -1,0 +1,52 @@
+TT00CD85 – Backend-testaajan manuaalinen tarkistuslista (H01–H10)
+Käytä Rest Clientia / curl / selainta. Kuvakaappaukset palautukseen (H00).
+
+PowerShell (H08): älä käytä nuolta → komennossa. Oikein:  cd H08; npm test   tai kaksi riviä: cd H08 ja sitten npm test
+
+MongoDB "bad auth: authentication failed" (H08 .env):
+- Tarkista Atlas Database Access: käyttäjätunnus ja salasana.
+- URI:ssa salasana URL-koodattava: ! -> %21, @ -> %40, # -> %23 jne.
+- Varmista että MONGO_URI käyttää samaa salasanaa kuin Atlas (vaihdon jälkeen päivitä .env).
+- Network Access: salli oma IP tai 0.0.0.0/0 (kehitys).
+
+H02 Express + JSON-tiedosto
+- GET /albums – lista
+- GET /albums/:id – löytyy / 404
+- POST /albums – luo (Content-Type: application/json)
+- PUT /albums/:id – päivitä
+- DELETE /albums/:id ilman ?debug=true → 400 + virheviesti
+- DELETE /albums/:id?debug=true → 200 ja poisto
+- public/index.html – lataa albumit, lisää, poista (fetch)
+
+H03–H05 Mongo (albumi-API)
+- Yhteys .env MONGO_URI
+- GET /api/albums (tai tehtävän polku) + yhdistelmät: ?sort=-year, ?year=1977, ?fields=artist,title, ?search=tot, ?startYear=1970&endYear=1980, ?page=1&limit=10
+
+H04 Validointi
+- POST virheellisillä kentillä (lyhyt artisti, väärä genre, vuosi > kuluva, tracks 0, duplikaatti artist+title)
+
+H06 JWT
+- POST /api/register – pakolliset kentät + password_confirmation
+- Rekisteröi sama email uudestaan → 409
+- POST /api/login → token
+- GET /getAllAlbums ilman Authorization → 200
+- POST /api/albums ilman Bearer → 401
+- POST /api/albums + Bearer → 201
+
+H07 Session + Passport
+- GET /albums/new ilman kirjautumista → redirect /login
+- Kirjaudu adminilla → POST /albums JSON-lomake → 201
+- user-rooli: näkee lomakkeen, POST → 403 tai Access Denied -sivu
+- GET /logout → istunto pois
+
+H08 Automaatio
+- Aja: npm test (H08-kansio) — käyttää mongodb-memory-serveriä, ei vaadi Atlas-kirjautumista.
+- Atlas-testi: aseta .env:ssä JEST_USE_ATLAS=1 ja kelvollinen MONGO_URI, sitten npm test.
+
+H09 GraphQL
+- Apollo Sandbox: query albums, album(id), mutation addAlbum, deleteAlbum; id vastaa Mongo _id:tä
+
+H10 Postgres (portti 5001)
+- GET http://localhost:5001/api/vehicles – include User
+- GET http://localhost:5001/api/users – include Vehicle
+- Sivut: /, /vehicles, /users, /vehicles/new, /users/new (Pug)
