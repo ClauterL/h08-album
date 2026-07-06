@@ -4,6 +4,7 @@ import mongoose from 'mongoose'
 import path from 'path'
 import { fileURLToPath } from 'url'
 import Album from './models/Album.js'
+import { fetchAllData, normalizeItems, buildPortfolio } from './api/flipping.js'
 
 const app = express()
 app.use(express.json())
@@ -50,6 +51,36 @@ app.post('/api/albums', async (req, res) => {
     res.status(201).json(album)
   } catch (err) {
     res.status(400).json({ error: err.message })
+  }
+})
+
+app.get('/flipping', (req, res) => {
+  res.sendFile(path.join(publicDir, 'flipping.html'))
+})
+
+app.get('/api/flipping/suggestions', async (req, res) => {
+  try {
+    const budget = Math.max(0, Number(req.query.budget) || 3_000_000)
+    const targetProfit = Math.max(0, Number(req.query.target) || 10_000_000)
+    const minVolume = Math.max(0, Number(req.query.minVolume) || 50)
+    const maxPicks = Math.min(30, Math.max(1, Number(req.query.maxPicks) || 15))
+    const membersOnly = req.query.members === 'true'
+    const f2pOnly = req.query.members === 'false'
+
+    const raw = await fetchAllData()
+    let items = normalizeItems(raw)
+    if (membersOnly) items = items.filter(it => it.members)
+    if (f2pOnly) items = items.filter(it => !it.members)
+
+    const portfolio = buildPortfolio(items, { budget, targetProfit, minVolume, maxPicks })
+    res.json({
+      ok: true,
+      generatedAt: new Date().toISOString(),
+      params: { budget, targetProfit, minVolume, maxPicks, membersOnly, f2pOnly },
+      ...portfolio
+    })
+  } catch (err) {
+    res.status(502).json({ ok: false, error: err.message })
   }
 })
 
