@@ -82,21 +82,24 @@ describe('scoreItem', () => {
 })
 
 describe('normalizeItems', () => {
-  test('yhdistää latest + 1h + mapping', () => {
+  test('yhdistää latest + 5m + 1h + mapping', () => {
     const items = normalizeItems({
       latest: { data: { 4151: { low: 15_000_000, lowTime: 1, high: 15_500_000, highTime: 2 } } },
+      fiveMin: { data: { 4151: { highPriceVolume: 3, lowPriceVolume: 2 } } },
       hourly: { data: { 4151: { avgHighPrice: 15_500_000, highPriceVolume: 30, avgLowPrice: 15_000_000, lowPriceVolume: 20 } } },
       mapping: [{ id: 4151, name: 'Abyssal whip', members: true, limit: 70 }]
     })
     expect(items).toHaveLength(1)
     expect(items[0].name).toBe('Abyssal whip')
     expect(items[0].hourlyVolume).toBe(50)
+    expect(items[0].fiveMinVolume).toBe(5)
     expect(items[0].buyLimit).toBe(70)
   })
   test('ohittaa tuntemattomat idt (ei mappingissa)', () => {
     const items = normalizeItems({
       latest: { data: { 999: { low: 1, high: 2 } } },
       hourly: { data: {} },
+      fiveMin: { data: {} },
       mapping: []
     })
     expect(items).toEqual([])
@@ -113,7 +116,7 @@ describe('buildPortfolio', () => {
   ]
 
   test('rakentaa suositukset budjetin sisällä', () => {
-    const p = buildPortfolio(items, { budget: 3_000_000, targetProfit: 10_000_000, minVolume: 50 })
+    const p = buildPortfolio(items, { budget: 3_000_000, targetProfit: 10_000_000, minVolume: 50, activeOnly: false })
     expect(p.picks.length).toBeGreaterThan(0)
     expect(p.usedCapital).toBeLessThanOrEqual(3_000_000)
     // Tappiollinen ja alavolyymi eivät saa päätyä listaan
@@ -124,16 +127,25 @@ describe('buildPortfolio', () => {
   })
 
   test('projected profit ja target-lippu ovat konsistentteja', () => {
-    const p = buildPortfolio(items, { budget: 3_000_000, targetProfit: 10_000_000, minVolume: 50 })
+    const p = buildPortfolio(items, { budget: 3_000_000, targetProfit: 10_000_000, minVolume: 50, activeOnly: false })
     const sum = p.picks.reduce((a, x) => a + x.projectedProfitPerDay, 0)
     expect(p.projectedProfit).toBe(sum)
     expect(p.targetMet).toBe(sum >= 10_000_000)
   })
 
   test('kunnioittaa minVolume-suodatinta', () => {
-    const p = buildPortfolio(items, { budget: 3_000_000, targetProfit: 1, minVolume: 1000 })
+    const p = buildPortfolio(items, { budget: 3_000_000, targetProfit: 1, minVolume: 1000, activeOnly: false })
     for (const pk of p.picks) {
       expect(pk.hourlyVolume).toBeGreaterThanOrEqual(1000)
     }
+  })
+
+  test('activeOnly poissulkee itemit joiden 5min volyymi on 0', () => {
+    const withActivity = [
+      { id: 10, name: 'Aktiivinen', buyPrice: 1000, sellPrice: 1200, hourlyVolume: 1000, fiveMinVolume: 40, buyLimit: 100 },
+      { id: 11, name: 'Uninen',     buyPrice: 1000, sellPrice: 1200, hourlyVolume: 1000, fiveMinVolume: 0,  buyLimit: 100 }
+    ]
+    const p = buildPortfolio(withActivity, { budget: 100_000, targetProfit: 1, minVolume: 50, activeOnly: true })
+    expect(p.picks.map(x => x.name)).toEqual(['Aktiivinen'])
   })
 })

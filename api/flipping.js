@@ -1,8 +1,13 @@
 // OSRS Grand Exchange -flippauslogiikka.
-// Käyttää OSRS Wikin ilmaista Prices API:a:
-//   https://prices.runescape.wiki/api/v1/osrs/latest
-//   https://prices.runescape.wiki/api/v1/osrs/1h
-//   https://prices.runescape.wiki/api/v1/osrs/mapping
+// Käyttää OSRS Wikin Real-time Prices APIa, joka on dokumentoitu:
+//   https://runescape.wiki/w/Application_programming_interface
+// Endpointit:
+//   GET /latest     — viimeisin instabuy (high) ja instasell (low) hinta / item id
+//   GET /5m         — 5 min keskihinnat + volyymit (viimeisin liukuma)
+//   GET /1h         — 1 h keskihinnat + volyymit
+//   GET /mapping    — item metadata (nimi, ostoraja, members, examine)
+//   GET /timeseries — hintasarja yhdelle itemille (chart)
+// Wiki pyytää selkeän User-Agentin ja yhteystiedon.
 
 export const GE_TAX_RATE = 0.01
 export const GE_TAX_CAP = 5_000_000
@@ -10,7 +15,8 @@ export const GE_TAX_MIN_PRICE = 100
 export const CYCLES_PER_DAY = 6 // GE-ostoraja päivittyy 4 tunnin välein → 6 sykliä / 24h
 
 const WIKI_BASE = 'https://prices.runescape.wiki/api/v1/osrs'
-const USER_AGENT = 'h08-album flipping-calculator (github.com/clauterl/h08-album)'
+const USER_AGENT = process.env.OSRS_WIKI_UA
+  || 'h08-album flipping-calculator - contact via https://github.com/ClauterL/h08-album/issues'
 
 // Yhdenoikeuden veron laskenta (1 %, katto 5M, alle 100gp verottomia).
 export function calcTax(sellPrice) {
@@ -60,24 +66,32 @@ export function scoreItem(item, { budget }) {
   }
 }
 
-// Yhdistää kolme API-vastausta yhdeksi normalisoiduksi listaksi.
-export function normalizeItems({ latest, hourly, mapping }) {
+// Yhdistää neljä API-vastausta (latest / 5m / 1h / mapping) normalisoiduksi listaksi.
+// 5 min volyymi kertoo onko tavara juuri nyt aktiivinen; 1 h volyymi tasoittaa satunnaisuutta.
+export function normalizeItems({ latest, hourly, mapping, fiveMin }) {
   const mappingById = new Map()
   for (const m of mapping || []) mappingById.set(String(m.id), m)
 
   const latestData = latest?.data || {}
   const hourlyData = hourly?.data || {}
+  const fiveMinData = fiveMin?.data || {}
 
-  const ids = new Set([...Object.keys(latestData), ...Object.keys(hourlyData)])
+  const ids = new Set([
+    ...Object.keys(latestData),
+    ...Object.keys(hourlyData),
+    ...Object.keys(fiveMinData)
+  ])
   const items = []
   for (const id of ids) {
     const meta = mappingById.get(String(id))
     if (!meta) continue
     const lp = latestData[id] || {}
     const hp = hourlyData[id] || {}
+    const fp = fiveMinData[id] || {}
     const buyPrice = Number(lp.low) || 0
     const sellPrice = Number(lp.high) || 0
     const hourlyVolume = (Number(hp.highPriceVolume) || 0) + (Number(hp.lowPriceVolume) || 0)
+    const fiveMinVolume = (Number(fp.highPriceVolume) || 0) + (Number(fp.lowPriceVolume) || 0)
     items.push({
       id: Number(id),
       name: meta.name,
@@ -88,6 +102,7 @@ export function normalizeItems({ latest, hourly, mapping }) {
       buyPrice,
       sellPrice,
       hourlyVolume,
+      fiveMinVolume,
       lastBuyAt: lp.lowTime ? Number(lp.lowTime) : null,
       lastSellAt: lp.highTime ? Number(lp.highTime) : null
     })
@@ -96,10 +111,14 @@ export function normalizeItems({ latest, hourly, mapping }) {
 }
 
 // Portfolion rakennus: greedy pääoman tehokkuuden mukaan kunnes budjetti / tavoite täyttyy.
-export function buildPortfolio(items, { budget, targetProfit, minVolume = 50, maxPicks = 15 }) {
+// activeOnly=true vaatii, että tavaralla on käyty kauppaa viimeisen 5 min sisällä.
+export function buildPortfolio(items, {
+  budget, targetProfit, minVolume = 50, maxPicks = 15, activeOnly = true
+}) {
   const scored = items
     .filter(it => it.buyPrice > 0 && it.sellPrice > 0)
     .filter(it => it.hourlyVolume >= minVolume)
+    .filter(it => !activeOnly || (it.fiveMinVolume ?? 0) > 0)
     .filter(it => it.buyPrice <= budget)
     .map(it => scoreItem(it, { budget }))
     .filter(Boolean)
@@ -160,10 +179,11 @@ export function buildPortfolio(items, { budget, targetProfit, minVolume = 50, ma
 
 // --- HTTP-haku ja välimuisti (tuotannolle) ---
 
-const cache = { latest: null, hourly: null, mapping: null }
+const cache = { latest: null, hourly: null, fiveMin: null, mapping: null }
 const TTL = {
-  latest: 60_000,       // 1 min
-  hourly: 5 * 60_000,   // 5 min
+  latest: 60_000,        // 1 min
+  fiveMin: 60_000,       // 1 min (endpointti päivittyy 5 min välein, mutta odotamme uutta ikkunaa nopeasti)
+  hourly: 5 * 60_000,    // 5 min
   mapping: 24 * 3600_000 // 24 h
 }
 
@@ -186,16 +206,27 @@ async function cachedFetch(key, path) {
 
 export async function fetchAllData({ force = false } = {}) {
   if (force) {
-    cache.latest = cache.hourly = cache.mapping = null
+    cache.latest = cache.hourly = cache.fiveMin = cache.mapping = null
   }
-  const [latest, hourly, mapping] = await Promise.all([
+  const [latest, fiveMin, hourly, mapping] = await Promise.all([
     cachedFetch('latest', '/latest'),
+    cachedFetch('fiveMin', '/5m'),
     cachedFetch('hourly', '/1h'),
     cachedFetch('mapping', '/mapping')
   ])
-  return { latest, hourly, mapping }
+  return { latest, fiveMin, hourly, mapping }
+}
+
+// Hakee hintasarjan yhdelle itemille kuvaajaa varten.
+// timestep: '5m' | '1h' | '6h' | '24h' (kts. wiki)
+export async function fetchTimeseries(itemId, timestep = '1h') {
+  const id = Number(itemId)
+  if (!Number.isFinite(id) || id <= 0) throw new Error('invalid itemId')
+  const allowed = new Set(['5m', '1h', '6h', '24h'])
+  const step = allowed.has(timestep) ? timestep : '1h'
+  return fetchJson(`/timeseries?id=${id}&timestep=${step}`)
 }
 
 export function _resetCacheForTests() {
-  cache.latest = cache.hourly = cache.mapping = null
+  cache.latest = cache.hourly = cache.fiveMin = cache.mapping = null
 }

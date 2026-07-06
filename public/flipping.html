@@ -56,6 +56,10 @@
             <option value="false">Vain F2P</option>
           </select>
         </label>
+        <label style="flex-direction: row; align-items: center; gap: 6px; margin-top: 14px;">
+          <input id="activeOnly" type="checkbox" checked style="min-width: 0;" />
+          Vain nyt aktiiviset (5 min)
+        </label>
         <button class="primary" id="btnCalc" type="button">Laske ehdotus</button>
         <span class="muted" id="status"></span>
       </div>
@@ -131,7 +135,8 @@
         const minVolume = $('minVolume').value
         const maxPicks = $('maxPicks').value
         const members = $('members').value
-        const params = new URLSearchParams({ budget, target, minVolume, maxPicks })
+        const activeOnly = $('activeOnly').checked ? 'true' : 'false'
+        const params = new URLSearchParams({ budget, target, minVolume, maxPicks, activeOnly })
         if (members) params.set('members', members)
 
         $('status').textContent = 'Haetaan hintadataa…'

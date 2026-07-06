@@ -4,7 +4,7 @@ import mongoose from 'mongoose'
 import path from 'path'
 import { fileURLToPath } from 'url'
 import Album from './models/Album.js'
-import { fetchAllData, normalizeItems, buildPortfolio } from './api/flipping.js'
+import { fetchAllData, normalizeItems, buildPortfolio, fetchTimeseries } from './api/flipping.js'
 
 const app = express()
 app.use(express.json())
@@ -66,19 +66,29 @@ app.get('/api/flipping/suggestions', async (req, res) => {
     const maxPicks = Math.min(30, Math.max(1, Number(req.query.maxPicks) || 15))
     const membersOnly = req.query.members === 'true'
     const f2pOnly = req.query.members === 'false'
+    const activeOnly = req.query.activeOnly !== 'false'
 
     const raw = await fetchAllData()
     let items = normalizeItems(raw)
     if (membersOnly) items = items.filter(it => it.members)
     if (f2pOnly) items = items.filter(it => !it.members)
 
-    const portfolio = buildPortfolio(items, { budget, targetProfit, minVolume, maxPicks })
+    const portfolio = buildPortfolio(items, { budget, targetProfit, minVolume, maxPicks, activeOnly })
     res.json({
       ok: true,
       generatedAt: new Date().toISOString(),
-      params: { budget, targetProfit, minVolume, maxPicks, membersOnly, f2pOnly },
+      params: { budget, targetProfit, minVolume, maxPicks, membersOnly, f2pOnly, activeOnly },
       ...portfolio
     })
+  } catch (err) {
+    res.status(502).json({ ok: false, error: err.message })
+  }
+})
+
+app.get('/api/flipping/timeseries', async (req, res) => {
+  try {
+    const data = await fetchTimeseries(req.query.id, req.query.timestep)
+    res.json({ ok: true, ...data })
   } catch (err) {
     res.status(502).json({ ok: false, error: err.message })
   }
